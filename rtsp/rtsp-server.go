@@ -180,6 +180,9 @@ func (server *Server) Stop() {
 		server.TCPListener = nil
 	}
 	server.pushersLock.Lock()
+	// for _, v := range server.pushers {
+	// 	v.Stop() // why hung up here???
+	// }
 	server.pushers = make(map[string]*Pusher)
 	server.pushersLock.Unlock()
 

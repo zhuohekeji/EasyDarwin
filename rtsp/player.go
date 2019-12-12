@@ -11,6 +11,7 @@ type Player struct {
 	Pusher *Pusher
 	cond   *sync.Cond
 	queue  []*RTPPack
+	rtpGopInfo RTPGopInfo
 	queueLimit int
 	dropPacketWhenPaused bool
 	paused bool
@@ -28,6 +29,7 @@ func NewPlayer(session *Session, pusher *Pusher) (player *Player) {
 		dropPacketWhenPaused: dropPacketWhenPaused != 0,
 		paused:  false,
 	}
+	player.rtpGopInfo.debugTag = player.String()
 	session.StopHandles = append(session.StopHandles, func() {
 		pusher.RemovePlayer(player)
 		player.cond.Broadcast()
@@ -47,10 +49,16 @@ func (player *Player) QueueRTP(pack *RTPPack) *Player {
 	player.cond.L.Lock()
 	player.queue = append(player.queue, pack)
 	if oldLen := len(player.queue); player.queueLimit > 0 && oldLen > player.queueLimit {
-		player.queue = player.queue[1:]
-		if player.debugLogEnable {
-			len := len(player.queue)
-			logger.Printf("Player %s, QueueRTP, exceeds limit(%d), drop %d old packets, current queue.len=%d\n", player.String(), player.queueLimit, oldLen - len, len)
+		player.rtpGopInfo.gotSPS = false
+		for pos, pack2 := range player.queue[1:] {
+			if rtp := ParseRTP(pack2.Buffer.Bytes()); rtp != nil && pack2.Type == RTP_TYPE_VIDEO && rtp.IsStartOfGOP(player.Pusher.VCodec(), &player.rtpGopInfo) {
+				player.queue = player.queue[pos + 1:]
+				if player.debugLogEnable {
+					len := len(player.queue)
+					logger.Printf("Player %s, QueueRTP, exceeds limit(%d), drop %d old packets, queue.len=%d\n", player.String(), player.queueLimit, oldLen - len, len)
+				}
+				break
+			}
 		}
 	}
 	player.cond.Signal()

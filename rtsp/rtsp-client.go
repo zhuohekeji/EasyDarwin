@@ -47,6 +47,7 @@ type RTSPClient struct {
 	VCodec               string
 	OptionIntervalMillis int64
 	SDPRaw               string
+	ServerSupportedMethods string
 
 	debugLogEnable       bool
 	lastRtpSN            uint16
@@ -233,6 +234,7 @@ func (client *RTSPClient) requestStream(timeout time.Duration) (err error) {
 			return err
 		}
 	}
+	client.ServerSupportedMethods = resp.Header["Public"].(string)
 
 	// A DESCRIBE request includes an RTSP URL (rtsp://...), and the type of reply data that can be handled. This reply includes the presentation description,
 	// typically in Session Description Protocol (SDP) format. Among other things, the presentation description lists the media streams controlled with the aggregate URL.
@@ -336,7 +338,22 @@ func (client *RTSPClient) requestStream(timeout time.Duration) (err error) {
 	}
 	headers = make(map[string]string)
 	if session != "" {
+		sessionSplits := strings.Split(session, ";")
+		session = sessionSplits[0]
+		if len(sessionSplits) == 2 {
+			timeoutSplits := strings.Split(sessionSplits[1], "=")
+			if len(timeoutSplits) == 2 {
+				sessionTimeout, err := strconv.Atoi(timeoutSplits[1]) // in seconds
+				if err != nil {
+					client.logger.Printf("strconv.Atoi err:%v, str:%v", err, timeoutSplits[1])
+				}
+				if sessionTimeout > 0 && client.OptionIntervalMillis == 0 {
+					client.OptionIntervalMillis = int64(sessionTimeout * 1000 / 2)
+				}
+			}
+		}
 		headers["Session"] = session
+		client.Session = session
 	}
 	resp, err = client.Request("PLAY", headers)
 	if err != nil {
@@ -354,9 +371,15 @@ func (client *RTSPClient) startStream() {
 			if time.Since(startTime) > time.Duration(client.OptionIntervalMillis)*time.Millisecond {
 				startTime = time.Now()
 				headers := make(map[string]string)
-				headers["Require"] = "implicit-play"
-				// An OPTIONS request returns the request types the server will accept.
-				if err := client.RequestNoResp("OPTIONS", headers); err != nil {
+				
+				// According to https://tools.ietf.org/id/draft-ietf-mmusic-rfc2326bis-33.html, 
+				// we use GET_PARAMETER as the default method for keeping alive
+				method := "GET_PARAMETER"
+				if strings.Index(client.ServerSupportedMethods, "GET_PARAMETER") == -1 {
+					method = "OPTIONS"
+				}
+
+				if err := client.RequestNoResp(method, headers); err != nil {
 					// ignore...
 				}
 			}
@@ -493,6 +516,18 @@ func (client *RTSPClient) startStream() {
 	}
 }
 
+func (client *RTSPClient) Teardown() (err error) {
+	if len(client.Session) > 0 {
+		headers := make(map[string]string)
+		err = client.RequestNoResp("TEARDOWN", headers)
+		if err != nil {
+			return
+		}
+		client.Session = ""
+	}
+	return
+}
+
 func (client *RTSPClient) Start(timeout time.Duration) (err error) {
 	if timeout == 0 {
 		timeoutMillis := utils.Conf().Section("rtsp").Key("timeout").MustInt(0)
@@ -515,6 +550,7 @@ func (client *RTSPClient) Stop() {
 		h()
 	}
 	if client.Conn != nil {
+		client.Teardown()
 		client.connRW.Flush()
 		client.Conn.Close()
 		client.Conn = nil

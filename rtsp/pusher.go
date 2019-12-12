@@ -2,7 +2,6 @@ package rtsp
 
 import (
 	"log"
-	"strings"
 	"sync"
 	"time"
 
@@ -17,8 +16,8 @@ type Pusher struct {
 	gopCacheEnable    bool
 	gopCache          []*RTPPack
 	gopCacheLock      sync.RWMutex
+	rtpGopInfo        RTPGopInfo
 	UDPServer         *UDPServer
-	spsppsInSTAPaPack bool
 	cond              *sync.Cond
 	queue             []*RTPPack
 }
@@ -164,6 +163,7 @@ func NewClientPusher(client *RTSPClient) (pusher *Pusher) {
 		cond:  sync.NewCond(&sync.Mutex{}),
 		queue: make([]*RTPPack, 0),
 	}
+	pusher.rtpGopInfo.debugTag = pusher.String()
 	client.RTPHandles = append(client.RTPHandles, func(pack *RTPPack) {
 		pusher.QueueRTP(pack)
 	})
@@ -186,6 +186,7 @@ func NewPusher(session *Session) (pusher *Pusher) {
 		cond:  sync.NewCond(&sync.Mutex{}),
 		queue: make([]*RTPPack, 0),
 	}
+	pusher.rtpGopInfo.debugTag = pusher.String()
 	pusher.bindSession(session)
 	return
 }
@@ -223,6 +224,7 @@ func (pusher *Pusher) RebindSession(session *Session) bool {
 	pusher.bindSession(session)
 	session.Pusher = pusher
 
+	pusher.rtpGopInfo.debugTag = pusher.String()
 	pusher.gopCacheLock.Lock()
 	pusher.gopCache = make([]*RTPPack, 0)
 	pusher.gopCacheLock.Unlock()
@@ -275,7 +277,7 @@ func (pusher *Pusher) Start() {
 
 		if pusher.gopCacheEnable && pack.Type == RTP_TYPE_VIDEO {
 			pusher.gopCacheLock.Lock()
-			if rtp := ParseRTP(pack.Buffer.Bytes()); rtp != nil && pusher.shouldSequenceStart(rtp) {
+			if rtp := ParseRTP(pack.Buffer.Bytes()); rtp != nil && rtp.IsStartOfGOP(pusher.VCodec(), &pusher.rtpGopInfo) {
 				pusher.gopCache = make([]*RTPPack, 0)
 			}
 			pusher.gopCache = append(pusher.gopCache, pack)
@@ -367,115 +369,4 @@ func (pusher *Pusher) ClearPlayer() {
 			v.Stop()
 		}
 	}()
-}
-
-func (pusher *Pusher) shouldSequenceStart(rtp *RTPInfo) bool {
-	if strings.EqualFold(pusher.VCodec(), "h264") {
-		var realNALU uint8
-		payloadHeader := rtp.Payload[0] //https://tools.ietf.org/html/rfc6184#section-5.2
-		NaluType := uint8(payloadHeader & 0x1F)
-		// log.Printf("RTP Type:%d", NaluType)
-		switch {
-		case NaluType <= 23:
-			realNALU = rtp.Payload[0]
-			// log.Printf("Single NAL:%d", NaluType)
-		case NaluType == 28 || NaluType == 29:
-			realNALU = rtp.Payload[1]
-			if realNALU&0x40 != 0 {
-				// log.Printf("FU NAL End :%02X", realNALU)
-			}
-			if realNALU&0x80 != 0 {
-				// log.Printf("FU NAL Begin :%02X", realNALU)
-			} else {
-				return false
-			}
-		case NaluType == 24:
-			// log.Printf("STAP-A")
-			off := 1
-			singleSPSPPS := 0
-			for {
-				nalSize := ((uint16(rtp.Payload[off])) << 8) | uint16(rtp.Payload[off+1])
-				if nalSize < 1 {
-					return false
-				}
-				off += 2
-				nalUnit := rtp.Payload[off : off+int(nalSize)]
-				off += int(nalSize)
-				realNALU = nalUnit[0]
-				singleSPSPPS += int(realNALU & 0x1F)
-				if off >= len(rtp.Payload) {
-					break
-				}
-			}
-			if singleSPSPPS == 0x0F {
-				pusher.spsppsInSTAPaPack = true
-				return true
-			}
-		}
-		if realNALU&0x1F == 0x05 {
-			if pusher.spsppsInSTAPaPack {
-				return false
-			}
-			return true
-		}
-		if realNALU&0x1F == 0x07 { // maybe sps pps header + key frame?
-			if len(rtp.Payload) < 200 { // consider sps pps header only.
-				return true
-			}
-			return true
-		}
-		return false
-	} else if strings.EqualFold(pusher.VCodec(), "h265") {
-		if len(rtp.Payload) >= 3 {
-			firstByte := rtp.Payload[0]
-			headerType := (firstByte >> 1) & 0x3f
-			var frameType uint8
-			if headerType == 49 { //Fragmentation Units
-
-				FUHeader := rtp.Payload[2]
-				/*
-				   +---------------+
-				   |0|1|2|3|4|5|6|7|
-				   +-+-+-+-+-+-+-+-+
-				   |S|E|  FuType   |
-				   +---------------+
-				*/
-				rtpStart := (FUHeader & 0x80) != 0
-				if !rtpStart {
-					if (FUHeader & 0x40) != 0 {
-						//log.Printf("FU frame end")
-					}
-					return false
-				} else {
-					//log.Printf("FU frame start")
-				}
-				frameType = FUHeader & 0x3f
-			} else if headerType == 48 { //Aggregation Packets
-
-			} else if headerType == 50 { //PACI Packets
-
-			} else { // Single NALU
-				/*
-					+---------------+---------------+
-					|0|1|2|3|4|5|6|7|0|1|2|3|4|5|6|7|
-					+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-					|F|   Type    |  LayerId  | TID |
-					+-------------+-----------------+
-				*/
-				frameType = firstByte & 0x7e
-			}
-			if frameType >= 16 && frameType <= 21 {
-				return true
-			}
-			if frameType == 32 {
-				// vps sps pps...
-				if len(rtp.Payload) < 200 { // consider sps pps header only.
-					return false
-				}
-				return true
-			}
-		}
-		return false
-	}
-	return false
 }
