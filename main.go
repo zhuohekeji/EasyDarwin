@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strings"
 	"time"
+	"sync"
 
 	"github.com/penggy/EasyGoLib/db"
 
@@ -29,6 +30,8 @@ type program struct {
 	httpServer *http.Server
 	rtspPort   int
 	rtspServer *rtsp.Server
+	pendingStreams	map[string]bool // Path <-> bool
+	pendingStreamsLock	sync.RWMutex
 }
 
 func (p *program) StopHTTP() (err error) {
@@ -127,37 +130,58 @@ func (p *program) Start(s service.Service) (err error) {
 
 	go func() {
 		log.Printf("demon pull streams")
+
+		agent := fmt.Sprintf("EasyDarwinGo/%s", routers.BuildVersion)
+		if routers.BuildDateTime != "" {
+			agent = fmt.Sprintf("%s(%s)", agent, routers.BuildDateTime)
+		}
+
+		p.pendingStreams = make(map[string]bool)
+
 		for {
 			var streams []models.Stream
-			db.SQLite.Find(&streams)
 			if err := db.SQLite.Find(&streams).Error; err != nil {
 				log.Printf("find stream err:%v", err)
 				return
 			}
 			for i := len(streams) - 1; i > -1; i-- {
 				v := streams[i]
-				agent := fmt.Sprintf("EasyDarwinGo/%s", routers.BuildVersion)
-				if routers.BuildDateTime != "" {
-					agent = fmt.Sprintf("%s(%s)", agent, routers.BuildDateTime)
-				}
-				client, err := rtsp.NewRTSPClient(rtsp.GetServer(), v.URL, int64(v.HeartbeatInterval)*1000, agent)
-				if err != nil {
-					continue
-				}
-				client.CustomPath = v.CustomPath
 
-				pusher := rtsp.NewClientPusher(client)
-				if rtsp.GetServer().GetPusher(pusher.Path()) != nil {
-					continue
+				p.pendingStreamsLock.Lock()
+				
+				_, ok := p.pendingStreams[v.CustomPath]
+				if (!ok) {
+					p.pendingStreams[v.CustomPath] = true
+
+					go func(i int, v models.Stream) {
+						defer func() {
+							p.pendingStreamsLock.Lock()
+							delete(p.pendingStreams, v.CustomPath)
+							p.pendingStreamsLock.Unlock()
+						}()
+
+						client, err := rtsp.NewRTSPClient(rtsp.GetServer(), v.URL, int64(v.HeartbeatInterval)*1000, agent)
+						if err != nil {
+							return
+						}
+						client.CustomPath = v.CustomPath
+		
+						pusher := rtsp.NewClientPusher(client)				
+						if rtsp.GetServer().GetPusher(pusher.Path()) != nil {
+							return
+						}
+
+						err = client.Start(time.Duration(v.IdleTimeout) * time.Second)
+						if err != nil {
+							log.Printf("Pull stream err :%v", err)
+							return
+						}
+						
+						rtsp.GetServer().AddPusher(pusher)
+					}(i, v)
 				}
-				err = client.Start(time.Duration(v.IdleTimeout) * time.Second)
-				if err != nil {
-					log.Printf("Pull stream err :%v", err)
-					continue
-				}
-				rtsp.GetServer().AddPusher(pusher)
-				//streams = streams[0:i]
-				//streams = append(streams[:i], streams[i+1:]...)
+
+				p.pendingStreamsLock.Unlock()
 			}
 			time.Sleep(10 * time.Second)
 		}

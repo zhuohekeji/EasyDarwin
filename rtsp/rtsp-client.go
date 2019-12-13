@@ -355,7 +355,7 @@ func (client *RTSPClient) requestStream(timeout time.Duration) (err error) {
 		headers["Session"] = session
 		client.Session = session
 	}
-	resp, err = client.Request("PLAY", headers)
+	err = client.RequestNoResp("PLAY", headers)
 	if err != nil {
 		return err
 	}
