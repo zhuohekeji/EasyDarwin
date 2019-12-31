@@ -215,8 +215,8 @@ func main() {
 	sec := utils.Conf().Section("service")
 	svcConfig := &service.Config{
 		Name:        sec.Key("name").MustString("EasyDarwin_Service"),
-		DisplayName: sec.Key("display_name").MustString("EasyDarwin_Service"),
-		Description: sec.Key("description").MustString("EasyDarwin_Service"),
+		DisplayName: sec.Key("display_name").MustString("CvcamRTSPService"),
+		Description: sec.Key("description").MustString("CvcamRTSPService"),
 	}
 
 	httpPort := utils.Conf().Section("http").Key("port").MustInt(10008)
