@@ -214,7 +214,7 @@ func main() {
 
 	sec := utils.Conf().Section("service")
 	svcConfig := &service.Config{
-		Name:        sec.Key("name").MustString("EasyDarwin_Service"),
+		Name:        sec.Key("name").MustString("CvcamRTSPService"),
 		DisplayName: sec.Key("display_name").MustString("CvcamRTSPService"),
 		Description: sec.Key("description").MustString("CvcamRTSPService"),
 	}
