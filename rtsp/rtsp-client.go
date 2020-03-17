@@ -51,6 +51,9 @@ type RTSPClient struct {
 
 	debugLogEnable       bool
 	lastRtpSN            uint16
+	VPacketCount		 uint32
+	VOctetCount			 uint32
+	rtpGopInfo 			 RTPGopInfo
 
 	Agent    string
 	authLine string
@@ -92,6 +95,7 @@ func NewRTSPClient(server *Server, rawUrl string, sendOptionMillis int64, agent 
 		Agent:                agent,
 		debugLogEnable:       debugLogEnable != 0,
 	}
+	client.rtpGopInfo.debugTag = client.ID
 	client.logger = log.New(os.Stdout, fmt.Sprintf("[%s]", client.ID), log.LstdFlags|log.Lshortfile)
 	if !utils.Debug {
 		client.logger.SetOutput(utils.GetLogWriter())
@@ -365,6 +369,7 @@ func (client *RTSPClient) requestStream(timeout time.Duration) (err error) {
 func (client *RTSPClient) startStream() {
 	startTime := time.Now()
 	loggerTime := time.Now().Add(-10 * time.Second)
+	deviceNoRTCP := strings.Contains(client.URL, "/live/") && !strings.Contains(client.URL, "/cvcam/")
 	defer client.Stop()
 	for !client.Stoped {
 		if client.OptionIntervalMillis > 0 {
@@ -460,6 +465,43 @@ func (client *RTSPClient) startStream() {
 				if elapsed >= 30*time.Second {
 					client.logger.Printf("%v read rtp frame.", client)
 					loggerTime = time.Now()
+				}
+			}
+
+			if deviceNoRTCP && pack.Type == RTP_TYPE_VIDEO {
+				client.VPacketCount += 1
+				client.VOctetCount += uint32(length)
+				rtp := ParseRTP(pack.Buffer.Bytes())
+				if rtp != nil {
+					if rtp.IsStartOfGOP(client.VCodec, &client.rtpGopInfo) {
+						rtcpBuf := bytes.NewBuffer([]byte{})
+						rtcpBuf.WriteByte(byte(0x80)) // Version 2
+						rtcpBuf.WriteByte(byte(0xc8)) // Sender Report
+						binary.Write(rtcpBuf, binary.BigEndian, uint16(6)) // Length
+						
+						binary.Write(rtcpBuf, binary.BigEndian, uint32(rtp.SSRC)) // Sender SSRC
+						
+						// NTP Timestamp
+						ts := time.Now()
+						tsMsw := uint32(ts.Unix() + 0x83AA7E80)
+						tsLsw := uint32(ts.Nanosecond()/15625000.0*0x04000000)
+						binary.Write(rtcpBuf, binary.BigEndian, tsMsw) // MSW
+						binary.Write(rtcpBuf, binary.BigEndian, tsLsw) // LSW
+
+						// RTP timestamp
+						binary.Write(rtcpBuf, binary.BigEndian, uint32(rtp.Timestamp))
+
+						binary.Write(rtcpBuf, binary.BigEndian, uint32(client.VPacketCount)) // Packet Count
+						binary.Write(rtcpBuf, binary.BigEndian, uint32(client.VOctetCount)) // Octet Count
+						
+						rtcpPack := &RTPPack{
+							Type:   RTP_TYPE_VIDEOCONTROL,
+							Buffer: rtcpBuf,
+						}
+						for _, h := range client.RTPHandles {
+							h(rtcpPack)
+						}
+					}
 				}
 			}
 

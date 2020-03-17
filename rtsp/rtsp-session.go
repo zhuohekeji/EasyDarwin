@@ -593,7 +593,7 @@ func (session *Session) handleRequest(req *Request) {
 				session.vRTPChannel, _ = strconv.Atoi(tcpMatchs[1])
 				session.vRTPControlChannel, _ = strconv.Atoi(tcpMatchs[3])
 			} else {
-				res.StatusCode = 500
+				res.StatusCode = 200
 				res.Status = fmt.Sprintf("SETUP [TCP] got UnKown control:%s", setupPath)
 				logger.Printf("SETUP [TCP] got UnKown control:%s", setupPath)
 			}

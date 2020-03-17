@@ -2,7 +2,7 @@ package rtsp
 
 import (
 	"encoding/binary"
-	"log"
+	// "log"
 	"strings"
 )
 
@@ -127,7 +127,7 @@ func (rtp *RTPInfo) IsStartOfGOP(VCodec string, rtpGopInfo *RTPGopInfo) bool {
 				rtpGopInfo.gotSPS = false
 				return false
 			}
-			log.Printf("%s, IDR, start of GOP", rtpGopInfo.debugTag)
+			// log.Printf("%s, IDR, start of GOP, rtp.Seq:%d, sps.Seq:%d", rtpGopInfo.debugTag, rtp.SequenceNumber, rtpGopInfo.spsSN)
 			return true
 		}
 		if realNALU&0x1F == 0x07 { // maybe sps pps header + key frame?
