@@ -209,13 +209,15 @@ func (client *RTSPClient) requestStream(timeout time.Duration) (err error) {
 	}
 
 	networkBuffer := utils.Conf().Section("rtsp").Key("network_buffer").MustInt(204800)
+	networkReadBuffer := utils.Conf().Section("rtsp").Key("network_read_buffer").MustInt(networkBuffer)
+	networkWriteBuffer := utils.Conf().Section("rtsp").Key("network_write_buffer").MustInt(networkBuffer)
 
 	timeoutConn := RichConn{
 		conn,
 		timeout,
 	}
 	client.Conn = &timeoutConn
-	client.connRW = bufio.NewReadWriter(bufio.NewReaderSize(&timeoutConn, networkBuffer), bufio.NewWriterSize(&timeoutConn, networkBuffer))
+	client.connRW = bufio.NewReadWriter(bufio.NewReaderSize(&timeoutConn, networkReadBuffer), bufio.NewWriterSize(&timeoutConn, networkWriteBuffer))
 
 	headers := make(map[string]string)
 	headers["Require"] = "implicit-play"
@@ -368,6 +370,8 @@ func (client *RTSPClient) requestStream(timeout time.Duration) (err error) {
 
 func (client *RTSPClient) startStream() {
 	startTime := time.Now()
+	hasRtcp := false
+	lastRtcpTime := startTime
 	loggerTime := time.Now().Add(-10 * time.Second)
 	deviceNoRTCP := strings.Contains(client.URL, "/live/") && !strings.Contains(client.URL, "/cvcam/")
 	defer client.Stop()
@@ -442,6 +446,11 @@ func (client *RTSPClient) startStream() {
 					Type:   RTP_TYPE_VIDEOCONTROL,
 					Buffer: rtpBuf,
 				}
+				if !hasRtcp {
+					hasRtcp = true
+					client.logger.Printf("%v received RTCP =============================", client)
+				}
+				lastRtcpTime = time.Now()
 			default:
 				client.logger.Printf("unknow rtp pack type, channel:%v", channel)
 				continue
@@ -502,6 +511,15 @@ func (client *RTSPClient) startStream() {
 							h(rtcpPack)
 						}
 					}
+				}
+			}
+
+			if !deviceNoRTCP && hasRtcp {
+				rtcpElapsed := time.Now().Sub(lastRtcpTime)
+				if rtcpElapsed >= 10*time.Second {
+					client.logger.Printf("%v RTCP lost !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! reconnect", client)
+					hasRtcp = false
+					return
 				}
 			}
 

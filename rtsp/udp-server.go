@@ -101,10 +101,12 @@ func (s *UDPServer) SetupAudio() (err error) {
 		return
 	}
 	networkBuffer := utils.Conf().Section("rtsp").Key("network_buffer").MustInt(1048576)
-	if err := s.AConn.SetReadBuffer(networkBuffer); err != nil {
+	networkReadBuffer := utils.Conf().Section("rtsp").Key("network_read_buffer").MustInt(networkBuffer)
+	networkWriteBuffer := utils.Conf().Section("rtsp").Key("network_write_buffer").MustInt(networkBuffer)
+	if err := s.AConn.SetReadBuffer(networkReadBuffer); err != nil {
 		logger.Printf("udp server audio conn set read buffer error, %v", err)
 	}
-	if err := s.AConn.SetWriteBuffer(networkBuffer); err != nil {
+	if err := s.AConn.SetWriteBuffer(networkWriteBuffer); err != nil {
 		logger.Printf("udp server audio conn set write buffer error, %v", err)
 	}
 	la := s.AConn.LocalAddr().String()
@@ -194,10 +196,12 @@ func (s *UDPServer) SetupVideo() (err error) {
 		return
 	}
 	networkBuffer := utils.Conf().Section("rtsp").Key("network_buffer").MustInt(1048576)
-	if err := s.VConn.SetReadBuffer(networkBuffer); err != nil {
+	networkReadBuffer := utils.Conf().Section("rtsp").Key("network_read_buffer").MustInt(networkBuffer)
+	networkWriteBuffer := utils.Conf().Section("rtsp").Key("network_write_buffer").MustInt(networkBuffer)
+	if err := s.VConn.SetReadBuffer(networkReadBuffer); err != nil {
 		logger.Printf("udp server video conn set read buffer error, %v", err)
 	}
-	if err := s.VConn.SetWriteBuffer(networkBuffer); err != nil {
+	if err := s.VConn.SetWriteBuffer(networkWriteBuffer); err != nil {
 		logger.Printf("udp server video conn set write buffer error, %v", err)
 	}
 	la := s.VConn.LocalAddr().String()

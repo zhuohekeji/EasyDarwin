@@ -139,6 +139,8 @@ func (session *Session) String() string {
 
 func NewSession(server *Server, conn net.Conn) *Session {
 	networkBuffer := utils.Conf().Section("rtsp").Key("network_buffer").MustInt(204800)
+	networkReadBuffer := utils.Conf().Section("rtsp").Key("network_read_buffer").MustInt(networkBuffer)
+	networkWriteBuffer := utils.Conf().Section("rtsp").Key("network_write_buffer").MustInt(networkBuffer)
 	timeoutMillis := utils.Conf().Section("rtsp").Key("timeout").MustInt(0)
 	timeoutTCPConn := &RichConn{conn, time.Duration(timeoutMillis) * time.Millisecond}
 	authorizationEnable := utils.Conf().Section("rtsp").Key("authorization_enable").MustInt(0)
@@ -148,7 +150,7 @@ func NewSession(server *Server, conn net.Conn) *Session {
 		ID:                  shortid.MustGenerate(),
 		Server:              server,
 		Conn:                timeoutTCPConn,
-		connRW:              bufio.NewReadWriter(bufio.NewReaderSize(timeoutTCPConn, networkBuffer), bufio.NewWriterSize(timeoutTCPConn, networkBuffer)),
+		connRW:              bufio.NewReadWriter(bufio.NewReaderSize(timeoutTCPConn, networkReadBuffer), bufio.NewWriterSize(timeoutTCPConn, networkWriteBuffer)),
 		StartAt:             time.Now(),
 		Timeout:             utils.Conf().Section("rtsp").Key("timeout").MustInt(0),
 		authorizationEnable: authorizationEnable != 0,

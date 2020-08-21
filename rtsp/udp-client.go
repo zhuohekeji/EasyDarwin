@@ -65,10 +65,12 @@ func (c *UDPClient) SetupAudio() (err error) {
 		return
 	}
 	networkBuffer := utils.Conf().Section("rtsp").Key("network_buffer").MustInt(1048576)
-	if err := c.AConn.SetReadBuffer(networkBuffer); err != nil {
+	networkReadBuffer := utils.Conf().Section("rtsp").Key("network_read_buffer").MustInt(networkBuffer)
+	networkWriteBuffer := utils.Conf().Section("rtsp").Key("network_write_buffer").MustInt(networkBuffer)
+	if err := c.AConn.SetReadBuffer(networkReadBuffer); err != nil {
 		logger.Printf("udp client audio conn set read buffer error, %v", err)
 	}
-	if err := c.AConn.SetWriteBuffer(networkBuffer); err != nil {
+	if err := c.AConn.SetWriteBuffer(networkWriteBuffer); err != nil {
 		logger.Printf("udp client audio conn set write buffer error, %v", err)
 	}
 
@@ -80,10 +82,10 @@ func (c *UDPClient) SetupAudio() (err error) {
 	if err != nil {
 		return
 	}
-	if err := c.AControlConn.SetReadBuffer(networkBuffer); err != nil {
+	if err := c.AControlConn.SetReadBuffer(networkReadBuffer); err != nil {
 		logger.Printf("udp client audio control conn set read buffer error, %v", err)
 	}
-	if err := c.AControlConn.SetWriteBuffer(networkBuffer); err != nil {
+	if err := c.AControlConn.SetWriteBuffer(networkWriteBuffer); err != nil {
 		logger.Printf("udp client audio control conn set write buffer error, %v", err)
 	}
 	return

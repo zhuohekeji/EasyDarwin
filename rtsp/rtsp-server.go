@@ -150,6 +150,8 @@ func (server *Server) Start() (err error) {
 	server.TCPListener = listener
 	logger.Println("rtsp server start on", server.TCPPort)
 	networkBuffer := utils.Conf().Section("rtsp").Key("network_buffer").MustInt(1048576)
+	networkReadBuffer := utils.Conf().Section("rtsp").Key("network_read_buffer").MustInt(networkBuffer)
+	networkWriteBuffer := utils.Conf().Section("rtsp").Key("network_write_buffer").MustInt(networkBuffer)	
 	for !server.Stoped {
 		conn, err := server.TCPListener.Accept()
 		if err != nil {
@@ -157,10 +159,10 @@ func (server *Server) Start() (err error) {
 			continue
 		}
 		if tcpConn, ok := conn.(*net.TCPConn); ok {
-			if err := tcpConn.SetReadBuffer(networkBuffer); err != nil {
+			if err := tcpConn.SetReadBuffer(networkReadBuffer); err != nil {
 				logger.Printf("rtsp server conn set read buffer error, %v", err)
 			}
-			if err := tcpConn.SetWriteBuffer(networkBuffer); err != nil {
+			if err := tcpConn.SetWriteBuffer(networkWriteBuffer); err != nil {
 				logger.Printf("rtsp server conn set write buffer error, %v", err)
 			}
 		}
